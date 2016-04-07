@@ -1,0 +1,280 @@
+---
+title: 'Outcomes'
+author: 'Alexandru Papiu'
+output:
+  html_document:
+    highlight: tango
+    theme: readable
+---
+
+There have already been a lot of really great scripts visulalizing this data so what I'd like to do is focus on a few aspects on the data that I think might be important but were a little trickier to visualize. The three aspects I will focuse on are are, breed and color.
+
+Let's load in the required packages and data for starters:
+```{r, message = FALSE, warning = FALSE}
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(lubridate)
+train <- read.csv("train.csv", stringsAsFactors = FALSE)
+```
+
+## Animal Age upon Outcome:
+
+First I'd like find a good way to see how the age of the animal influences the shelter outcome. Age is usually pretty straighforward to deal with but in this case it come in a slightly odd format. Here are the first five entries:``r train$AgeuponOutcome %>% head(5)``
+
+The issue here is that there are too many factors and they are not in order so what I will do is group some factors together and then reorder them. Maybe there is a better way to do this but I pretty much do it manually, joining certain groups together.
+
+```{r, echo = FALSE}
+
+train$OutcomeType[train$OutcomeType == "Return_to_owner"] <- "Return to Owner"
+train$age  <- train$AgeuponOutcome
+
+train$age[grepl("day", train$AgeuponOutcome)] <- "< a week"
+train$age[grepl("week", train$AgeuponOutcome)] <-  "< a month"
+
+filter(train, age != "") -> train
+filter(train, age != "0 years") -> train
+
+train$age[train$age %in% c("13 years", "14 years", "15 years", "16 years", "17 years", "18 years",
+                           "19 years", "20 years")] <- "> 12 years" 
+
+
+train$age <- factor(train$age, level = c("< a week", "< a month", 
+                                         "1 month", "2 months", "3 months", "4 months", "5 months", "6 months" ,"7 months",
+                                         "8 months", "9 months", "10 months", "11 months",
+                                         "1 year", "2 years", "3 years", "4 years", "5 years",
+                                         "6 years", "7 years", "8 years", "9 years", "10 years", "11 years",
+                                         "12 years", "> 12 years"))
+```
+
+
+One we have reordered we are in a good position to visualize the data using stacked bar charts with age as the x variable. While the stacked relative frequency graphs are great at showing what outcomes are more likely for different ages they do not show the actual count of animals for given age groups. To remedy this I am adding a histogram on top of the relative frequency of outcomes. This way we can have a more complete picture of how outcome is influenced by age.
+
+
+```{r, fig.height = 8, fig.width = 12}
+train %>% count(age) %>%  
+    ggplot(aes(x = age, y = n)) +
+        geom_bar(stat = "identity", alpha = 0.5) +
+        theme_void() + 
+        ylab("Count") + 
+        ggtitle("Outcome Type by Age upon Outcome") +
+        theme(axis.title.y = element_text(angle = 90, color = "#737373" )) -> g1
+
+ggplot(train, aes(x = age, fill = OutcomeType)) +
+     geom_bar(stat = "count", position = "fill",  alpha = 0.9) +
+     scale_fill_brewer(palette = "Set1") +
+     theme_void() + 
+     ylab("Relative Count by Outcome") +
+     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 11, color = "#737373"),
+           legend.position = "bottom",
+           axis.title.y = element_text(angle = 90, color = "#737373")) -> g2
+
+grid.arrange(g1, g2, ncol = 1, heights = c(1,3))
+```
+
+What does the graph above tell us? Interestingly animals that are less than one month old are almost always transfered. Keep in mind that we are looking at age upon outcome so a data point represents a certain action being taken - most young animals will probably stay put and not make it to this dataset. Once the animal is not a baby anymore it reaches its peack in terms of adoption probability very eraly - at around 2 months. From there on the chances of adoption decrease gradually while the chances of both euthanasia and return to the owner increase. Fortunately even old animals are seldomly euthanasiazed with th
+
+
+## Breeds:
+
+There are `r unique(train$Breed) %>% length()` unique
+breeds in our dataset. This is way too many to try to visualize factor by factor. We will have to come up with a way to find coarser group for our breeds.
+
+For starters I will borrow an idea from Megan's excellent script [here]() and remove the "Mix" word (which would be better used as a separate feature) and only keep the first breed:
+```{r}
+
+gsub(" Mix", "", train$Breed) -> temp
+
+strsplit(x = temp, split = "/") %>% sapply(function(x){x[1]}) -> train$breed1
+```
+
+Even once we do this we still have more than 200 breeds but fortunately the majority of animals fall within the better known breeds - the top 15 breeds cover more than 75% of the dataset.
+
+```{r}
+train %>% 
+    count(breed1) %>% 
+    arrange(desc(n)) %>%  head(15) %>% 
+    ggplot(aes(x = reorder(breed1, n), y = n)) +
+    geom_bar(stat = "identity", width = 0.8) +
+    coord_flip() + 
+    theme(axis.title.y = element_blank()) +
+    ggtitle("Popular Breeds") +
+    ylab("Number of Animals")
+    
+```
+
+What we'll do at this point is select the breeds that are most popular and identify all other breeds as exotic. Let's call a breed exotic if there are less than 150 animals in our dataset with the given breed - this will decrease the variance for the types of outcomes and hopefully allow us to see the patterns that are really there. Then we'll plot the the breeds by outcome. Since cats and dogs tend to have different outomes we will do two separate plots, one for dogs and one for cats.
+
+```{r}
+count(train, breed1) %>%
+    arrange(desc(n)) %>%
+    filter(n >150) -> popular
+
+train$breed1[!(train$breed1 %in% popular$breed1)] <- "Exotic"
+
+
+#a look at the plots:
+filter(train, AnimalType == "Cat") %>% 
+ggplot(aes(x = breed1, fill = OutcomeType)) +
+    geom_bar(stat = "count", position = "fill", width = 0.7) + 
+    coord_flip() +
+    ggtitle(" Cat Breeds by Outcome") + 
+    scale_fill_brewer(palette = "Set1") +
+    theme(axis.title = element_blank())
+```
+
+It looks like there is some variation in the outcomes based on cat breeds. It might be more useful if we could order the plot above based on, say, fraction on cats adopted. Let's do this below using a Cleveland dot graph.
+
+```{r}
+breedz <- data.frame(breed = train$breed1, outcome = train$OutcomeType, type = train$AnimalType)
+
+breedz %>% 
+    group_by(type, breed, outcome) %>% 
+    summarise(n = n()) %>% 
+    mutate(frac =  n/sum(n)) %>% 
+    ungroup() %>% 
+    filter(outcome == "Adoption", type == "Cat") %>% 
+    arrange(frac) %>% 
+    ggplot(aes(x = reorder(breed, frac), y = frac)) +
+    geom_point(size = 3, color = "dark blue") +
+    theme_minimal() +
+    coord_flip() +
+    ylab("Fraction Adopted") +
+    ggtitle("Adoption Rate by Breed - Cats") +
+    theme(axis.title.y = element_blank())
+```
+
+This looks quite interesting! There is almost a linear trend in fraction of cats adopted based on breed. Not only that but the adoption rate is inversely proportional to how exotic a certain breed is: lesser known breeds tent to be adopted at a higher rate than common breeds like the `Domestic Shorthair`.
+
+Now let's take a look at the dogs:
+
+```{r}
+filter(train , AnimalType == "Dog") %>% 
+    ggplot(aes(x = breed1, fill = OutcomeType)) +
+    geom_bar(stat = "count", position = "fill", width = 0.8) + 
+    ggtitle("Dog Breeds by Outcome") +
+    coord_flip() +
+    scale_fill_brewer(palette = "Set1") +
+    theme(axis.title = element_blank())
+```
+
+And let's reorder these based on adoption rates as well: 
+
+```{r}
+breedz %>% 
+    group_by(type, breed, outcome) %>% 
+    summarise(n = n()) %>% 
+    mutate(frac =  n/sum(n)) %>% 
+    ungroup() %>% 
+    filter(outcome == "Adoption", type == "Dog") %>% 
+    arrange(frac) %>% 
+    ggplot(aes(x = reorder(breed, frac), y = frac)) +
+    geom_point(size = 3, color = "dark blue") +
+    theme_minimal() +
+    coord_flip() +
+    ylab("Fraction Adopted") +
+    ggtitle("Adoption Rate by Breed - Dogs") +
+    theme(axis.title.y = element_blank())
+```
+
+Shih Tzu seems to be the outlier here: very low adoptions rates - around 10%, but also very low euthanasia rates. Most Shih Tzu's are transfered or returned. On thing to note is that there aren't that many dogs of this breed in the data set - only 176 so some of the variance might be.
+My theory here would be that Shih Tzu's seem to be a little too fancy of a breed for people to adopt. Most people looking for one would probably go to a breeder so that they have more information about the dog. This would explain the low adoption rates. 
+
+```{r}
+breedz %>% 
+    group_by(type, breed, outcome) %>% 
+    summarise(n = n()) %>% 
+    mutate(frac =  n/sum(n)) %>% 
+    ungroup() %>% 
+    filter(outcome == "Euthanasia", type == "Dog") %>% 
+    arrange(frac) %>% 
+    ggplot(aes(x = reorder(breed, frac), y = frac)) +
+    geom_point(size = 3, color = "dark blue") +
+    theme_minimal() +
+    coord_flip() +
+    ylab("Fraction Euthanised") +
+    ggtitle("Euthanasia Rates by Breed - Dogs") +
+    theme(axis.title.y = element_blank())
+```
+
+The euthanasia rate seems highly correlated with the percieved agressiveness and size of the breed: Pit Bulls and Rottweilers have the highest rate by far. On the other hand toy breeds that are deemed cute and harmless have very low rates. 
+
+Without a few notable exceptions however breed isn't a real dealbreaker or maker when it comes to outcome however.
+
+### Hour and Weekday:
+
+Do more animals get adopted on the weekend? During rush hour? Stay tuned to find out. First we have to extract the information from the `DateTime` columns. This is easily done using the `lubridate` package.
+
+```{r}
+train %>% 
+    mutate(hour = hour(train$DateTime),
+           wday = wday(train$DateTime)) -> train
+```
+
+Let's look at the hour and plot the count by hour with fill colors based on outcome.
+```{r}
+ggplot(filter(train), aes(x = hour, fill = OutcomeType)) +
+    geom_bar(stat = "count") + 
+    scale_fill_brewer(palette = "Set1") +
+    ggtitle("Outcomes by Hour")
+```
+
+Interesting. The bulk of activity happens, as expected, during the day - roughly between 8 and 19 (or 7pm). A lot of transfers happen at 0 - this might be some sort of artefact, but it is worth keeping. 
+
+It's a little hard to see relative frequencies since the bars have different sizes so let's zoom in to the more popular hours and normalize the lenghs of our bars:
+
+```{r}
+ggplot(filter(train, hour > 7, hour <21), aes(x = hour, fill = OutcomeType)) +
+    geom_bar(stat = "count", position = "fill") + 
+    scale_fill_brewer(palette = "Set1") +
+    ggtitle("Outcomes for Daytime Hours")
+```
+
+Hmmm...the adoptions start off strong at 8,then drop precipitously at 9, pick back up at 10 then are roughly stable untill the evening when the adoption rates rise significantly. Also note how most euthanasias are done in the morning - at 8 am and 10 am, respectively. I wonder why.
+
+### Colors:
+
+Let's look at colors too. Perhaps surprisingly it seems like color doesn't play too big a role once we control for animal type. Perhaps the most interesting aspect of the plot below is that cats are returned to owners at a significantly lower rate than dogs.
+
+```{r}
+
+# color doesn't seem to matter:
+strsplit(x = train$Color, split = "/") %>% sapply(function(x){x[1]}) -> train$color1
+
+#pplot(color1)
+
+#CATS:
+cats <- filter(train, AnimalType == "Cat")
+
+cats %>% count(color1) %>% arrange(desc(n)) %>% 
+    filter(n > 400) -> cat_colors
+
+cats$color1[!(cats$color1 %in% cat_colors$color1)] <- "Other"
+
+ggplot(cats, aes(x = color1, fill = OutcomeType)) +
+    geom_bar(stat = "count", position = "fill", width = 0.7) + 
+    ggtitle("Cat Colors by Outcome") +
+    coord_flip() +
+    scale_fill_brewer(palette = "Set1") +
+    theme(axis.title = element_blank(), 
+          legend.position = "none") -> g3
+
+
+#DOGS:
+cats <- filter(train, AnimalType == "Dog")
+
+cats %>% count(color1) %>% arrange(desc(n)) %>% 
+    filter(n > 400) -> cat_colors
+
+cats$color1[!(cats$color1 %in% cat_colors$color1)] <- "Other"
+
+ggplot(cats, aes(x = color1, fill = OutcomeType)) +
+    geom_bar(stat = "count", position = "fill", width = 0.7) + 
+    coord_flip() +
+    ggtitle("Dog Colors by Outcome") +
+    scale_fill_brewer(palette = "Set1") +
+    theme(axis.title = element_blank()) -> g4
+
+grid.arrange(g3, g4, nrow = 1, widths = c(3,4))
+
+```
