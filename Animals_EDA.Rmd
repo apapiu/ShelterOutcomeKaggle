@@ -7,15 +7,16 @@ output:
     theme: readable
 ---
 
-There have already been a lot of really great scripts visulalizing this data so what I'd like to do is focus on a few aspects on the data that I think might be important but were a little trickier to visualize. The three aspects I will focuse on are are, breed and color.
+There have already been a lot of really great scripts visulalizing this data so what I'd like to do is focus on a few aspects of the data that I think might be important but were a little trickier to visualize. The four aspects I will focus on are age, breed, color and time of week/day.
 
 Let's load in the required packages and data for starters:
+
 ```{r, message = FALSE, warning = FALSE}
 library(dplyr)
 library(ggplot2)
 library(gridExtra)
 library(lubridate)
-train <- read.csv("train.csv", stringsAsFactors = FALSE)
+train <- read.csv("data/train.csv", stringsAsFactors = FALSE)
 ```
 
 ## Animal Age upon Outcome:
@@ -47,9 +48,7 @@ train$age <- factor(train$age, level = c("< a week", "< a month",
                                          "12 years", "> 12 years"))
 ```
 
-
 One we have reordered we are in a good position to visualize the data using stacked bar charts with age as the x variable. While the stacked relative frequency graphs are great at showing what outcomes are more likely for different ages they do not show the actual count of animals for given age groups. To remedy this I am adding a histogram on top of the relative frequency of outcomes. This way we can have a more complete picture of how outcome is influenced by age.
-
 
 ```{r, fig.height = 8, fig.width = 12}
 train %>% count(age) %>%  
@@ -72,7 +71,7 @@ ggplot(train, aes(x = age, fill = OutcomeType)) +
 grid.arrange(g1, g2, ncol = 1, heights = c(1,3))
 ```
 
-What does the graph above tell us? Interestingly animals that are less than one month old are almost always transfered. Keep in mind that we are looking at age upon outcome so a data point represents a certain action being taken - most young animals will probably stay put and not make it to this dataset. Once the animal is not a baby anymore it reaches its peack in terms of adoption probability very eraly - at around 2 months. From there on the chances of adoption decrease gradually while the chances of both euthanasia and return to the owner increase. Fortunately even old animals are seldomly euthanasiazed with th
+What does the graph above tell us? Interestingly animals that are less than one month old are almost always transfered. Keep in mind that we are looking at age upon outcome so a data point represents a certain action being taken - most young animals will probably stay put and not make it to this dataset. Once the animal is not a baby anymore it reaches its peack in terms of adoption probability very eraly - at around 2 months. From there on the chances of adoption decrease gradually while the chances of both euthanasia and return to the owner increase. Fortunately even old animals are seldomly euthanasiazed.
 
 
 ## Breeds:
@@ -80,7 +79,7 @@ What does the graph above tell us? Interestingly animals that are less than one 
 There are `r unique(train$Breed) %>% length()` unique
 breeds in our dataset. This is way too many to try to visualize factor by factor. We will have to come up with a way to find coarser group for our breeds.
 
-For starters I will borrow an idea from Megan's excellent script [here]() and remove the "Mix" word (which would be better used as a separate feature) and only keep the first breed:
+For starters I will borrow an idea from Megan's excellent script [here](https://www.kaggle.com/mrisdal/shelter-animal-outcomes/quick-dirty-randomforest) and remove the "Mix" word (which would be better used as a separate feature) and only keep the first breed:
 ```{r}
 
 gsub(" Mix", "", train$Breed) -> temp
@@ -202,7 +201,6 @@ The euthanasia rate seems highly correlated with the percieved agressiveness and
 Without a few notable exceptions however breed isn't a real dealbreaker or maker when it comes to outcome however.
 
 ### Hour and Weekday:
-
 Do more animals get adopted on the weekend? During rush hour? Stay tuned to find out. First we have to extract the information from the `DateTime` columns. This is easily done using the `lubridate` package.
 
 ```{r}
@@ -232,7 +230,20 @@ ggplot(filter(train, hour > 7, hour <21), aes(x = hour, fill = OutcomeType)) +
 
 Hmmm...the adoptions start off strong at 8,then drop precipitously at 9, pick back up at 10 then are roughly stable untill the evening when the adoption rates rise significantly. Also note how most euthanasias are done in the morning - at 8 am and 10 am, respectively. I wonder why.
 
-### Colors:
+Let's also look at outcomes by day of week:
+```{r}
+ggplot(train, aes(x = wday, fill = OutcomeType)) +
+    geom_bar(stat = "count", position = "fill") + 
+    scale_fill_brewer(palette = "Set1") +
+    ggtitle("Outcomes by Day of Week")
+```
+
+It looks like more animals are adopted and less animals are transfered on the weekend.
+
+Based on the graphs above it looks like hour and weekday are important features for predicting outcome but, to be honest, I would have like it better if these features were not inluded. This is because `DateTime` has no predictive power in a real life situation. All it tell us is how the shelters operate - more euthanasias in the morning, more adoptions later in the day etc. **If you wanted to predict the outcome of a specific animal, say a 9 month old beagle named Jimmy, you wouldn't know a priori what time the outcome would happen now would you?** So these features, while having predictive power in the kaggle contest, are rather useless in real life situations.
+
+
+## Colors:
 
 Let's look at colors too. Perhaps surprisingly it seems like color doesn't play too big a role once we control for animal type. Perhaps the most interesting aspect of the plot below is that cats are returned to owners at a significantly lower rate than dogs.
 
@@ -275,6 +286,8 @@ ggplot(cats, aes(x = color1, fill = OutcomeType)) +
     scale_fill_brewer(palette = "Set1") +
     theme(axis.title = element_blank()) -> g4
 
-grid.arrange(g3, g4, nrow = 1, widths = c(3,4))
+grid.arrange(g3, g4, nrow = 1, widths = c(3,5))
 
 ```
+
+### Thanks for reading!
