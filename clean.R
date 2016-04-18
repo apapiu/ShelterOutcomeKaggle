@@ -2,127 +2,118 @@ library(dplyr)
 library(ggplot2)
 library(lubridate)
 library(tidyr)
+library(Matrix)
 
+train <- read.csv("data/train.csv", stringsAsFactors = FALSE)
+test <- read.csv("data/test.csv", stringsAsFactors = FALSE)
+y <- as.factor(train$OutcomeType)
 
-train <- read.csv("train.csv", stringsAsFactors = FALSE)
+names(train)[1] <- "ID"
 
-#train %>% filter(AnimalType == "Cat") -> train
-
-#sapply(train, function(x){unique(x) %>% length()})
-
-#AnimalID        Name       DateTime    OutcomeType 
-#26729           6375          22918              5 
-#OutcomeSubtype     AnimalType SexuponOutcome AgeuponOutcome 
-#17              2              6             45 
-#Breed          Color 
-#1380            366 
-
-#[1] "AnimalID"       "Name"           "DateTime"      
-#[4] "OutcomeType"    "OutcomeSubtype" "AnimalType"    
-#[7] "SexuponOutcome" "AgeuponOutcome" "Breed"         
-#[10] "Color" 
-
-#plot function:
+data <- rbind(train[,-c(4,5)], test)
 
 #NAME:
-train$named <- 1*(train$Name != "")
+data$named <- 1*(data$Name != "")
 
 #let's start with DATETIME:
-train %>% 
-    mutate(year = year(train$DateTime),
-           month = month(train$DateTime),
-           day = day(train$DateTime),
-           hour = hour(train$DateTime),
-           wday = wday(train$DateTime)) -> train
+data %>% 
+    mutate(year = year(data$DateTime),
+           month = month(data$DateTime),
+           day = day(data$DateTime),
+           hour = hour(data$DateTime),
+           wday = wday(data$DateTime)) -> data
+
+
+data$DateTime <- as.numeric(as.POSIXct(data$DateTime))
 
 #make a weekend var:
-train$weekend <- 1*train$wday %in% c(1, 7)
+data$weekend <- 1*data$wday %in% c(1, 7)
 
 # so I should use weekend, year, month and hour - no NA's
 
 #SEXUPONOUTCOME:
 # seems important:
-train$SexuponOutcome[train$SexuponOutcome == ""] <- "Unknown"
+data$SexuponOutcome[data$SexuponOutcome == ""] <- "Unknown"
 
 #AGEUPONOUTCOME:
 
-train$age  <- train$AgeuponOutcome
-
-train$age[grepl("day", train$AgeuponOutcome)] <- "< a week"
-train$age[grepl("week", train$AgeuponOutcome)] <-  "< a month"
-
-train$age[train$age == ""] <- "1 year"
-
-
-train$age[train$age %in% c("13 years", "14 years", "15 years", "16 years", "17 years", "18 years",
+data$age  <- data$AgeuponOutcome
+data$age[grepl("day", data$AgeuponOutcome)] <- "< a week"
+data$age[grepl("week", data$AgeuponOutcome)] <-  "< a month"
+data$age[data$age == ""] <- "1 year"
+data$age[data$age %in% c("13 years", "14 years", "15 years", "16 years", "17 years", "18 years",
                            "19 years", "20 years")] <- "> 12 years" 
 
+data$AgeuponOutcome <- gsub(" years?","0000",data$AgeuponOutcome)
+data$AgeuponOutcome <- gsub(" months?","00",data$AgeuponOutcome)
+data$AgeuponOutcome <- gsub(" weeks?","0",data$AgeuponOutcome)
+data$AgeuponOutcome <- gsub(" days?","",data$AgeuponOutcome)
+data$AgeuponOutcome <- as.numeric(paste0("0",data$AgeuponOutcome))
 
-train$mix <- 1*(grepl("Mix", train$Breed, fixed = TRUE))
+#MIX:
+data$mix <- 1*(grepl("Mix", data$Breed, fixed = TRUE))
 
 #BREED:
 # seems to matter mostly for cats & PitBull:
 
-gsub(" Mix", "", train$Breed) -> temp
+gsub(" Mix", "", data$Breed) -> temp
 
-strsplit(x = temp, split = "/") %>% sapply(function(x){x[1]}) -> train$breed1
+strsplit(x = temp, split = "/") %>% sapply(function(x){x[1]}) -> data$breed1
 
-count(train, breed1) %>%
-    arrange(desc(n)) %>%
-    filter(n >75) -> popular
 
-train$breed1[!(train$breed1 %in% popular$breed1)] <- "Exotic"
 
-#train$breed1[!(train$breed1 %in% c("Pit Bull", 
-#                                    "Domestic Shorthair", "Domestic Medium Hair",
-#                               "Domestic Longhair", "Siamese"))] <- "other"
+count(data, breed1) %>% arrange(desc(n)) %>% filter(n >75) -> popular
+
+data$breed1[!(data$breed1 %in% popular$breed1)] <- "Exotic"
 
 #COLORS:
-
-strsplit(x = train$Color, split = "/") %>% sapply(function(x){x[1]}) -> train$color1
-
-train %>% count(color1) %>% arrange(desc(n)) %>% filter(n > 200) -> colors
-    
-train$color1[!(train$color1 %in% colors$color1)] <- "othercolor"
-
-
+strsplit(x = data$Color, split = "/") %>% sapply(function(x){x[1]}) -> data$color1
+data %>% count(color1) %>% arrange(desc(n)) %>% filter(n > 200) -> colors
+data$color1[!(data$color1 %in% colors$color1)] <- "othercolor"
 
 #dash in the breed:
-
-train$dash <- grepl("/", train$Breed)
+data$dash <- grepl("/", data$Breed)
 
 #number of letter in the name:
-train$namelength <- nchar(train$Name)
+data$namelength <- nchar(data$Name)
+
+#
+data$DateTime <- scale(data$DateTime)
+
+#see how many levels you have
+sapply(data, function(x){unique(x) %>% length()})
+
+
+
+
+train <- cbind(data[1:dim(train)[1],], OutcomeType = y) 
+test <- cbind(data[-(1:dim(train)[1]),])
+
 
 
 
 # now we're good.
-design_matrix_in <- model.matrix(OutcomeType ~ SexuponOutcome + 
-                                     age + hour + named + mix + breed1 + wday +
-                                     weekend  + month + as.factor(year) + color1 +
-                                     dash + namelength, 
-                                 data = train)[,-1]
+
+#let's also create the design_matrices.
+design_matrix <- sparse.model.matrix( ~   DateTime +
+                                          AnimalType +
+                                          SexuponOutcome +
+                                          age +
+                                          AgeuponOutcome +
+                                          weekend +
+                                          hour +
+                                          breed1 +
+                                          namelength +
+                                          named +
+                                          wday +
+                                          mix, 
+                                 data = data)[,-1]
 
 
-design_matrix_in <- model.matrix(OutcomeType ~ SexuponOutcome +AgeuponOutcome, data = train)[,-1]
+design_matrix_train <- design_matrix[1:dim(train)[1],]
 
+design_matrix_test <- design_matrix[-(1:dim(train)[1]),]
 
+new_y <- as.numeric(y) - 1 # for xgboost.
 
-
-
-#EDA:
-pplot <- function(x) {
-    x <- substitute(x)
-    ggplot(data = train, aes_q(x = x, fill = substitute(OutcomeType))) + 
-        geom_bar(stat = "count", position = "fill", width = 0.6) +
-        coord_flip() +
-        scale_fill_brewer(palette = "Set1")
-}
-
-pplot(year)
-pplot(month)
-pplot(day) #exclude this, seems noisy
-pplot(hour)
-pplot(wday) #more adoptions on the weekend.
-
-
+save.image("data.Rdata")
