@@ -1,125 +1,144 @@
-library(LiblineaR)
-library(ranger)
-library(randomForest)
+#we've got a multiclass classification problem
 
-# run clean.R first
-#REG LOGISTIC REGRESSSION:
-design_matrix <- as.matrix(design_matrix_train)
+library(glmnet) #for regularized logistic regression
+library(ranger) #for random forests
+library(xgboost) #for boosted trees
+library(dplyr) #data manipulation
+library(LiblineaR) #logistic regression
+library(ggplot2) #plotting
 
-model_gen <- LiblineaR(design_matrix, y, type = 0)
+load("data.Rdata")
 
-predict(model_gen, design_matrix, proba = TRUE)$probabilities -> temp
+#~~~~~~~~~~~~~~~~~~~~~~~~
+#L_1/L_2 Logistic Regression:
+#~~~~~~~~~~~~~~~~~~~~~~~~
 
-table(unlist(predict(model_gen, design_matrix)), y) ->results
-sum(diag(results))/sum(results)
-#65.5 % accuracy on gen
+model_lasso <- cv.glmnet(x = design_matrix_train[1:1000,], y[1:1000],
+                      family = "multinomial")
+#glmnet takes a while
 
+X <- as.matrix(design_matrix_train)
+X[,1] <- scale(X[,1])
+X[,"AgeuponOutcome"] <- scale(X[,"AgeuponOutcome"])
 
+model_lin <- LiblineaR(data = X, target = y)
+#34% CV Error
 
-#RANDOM FORESTS:
+X <- as.matrix(design_matrix_test)
 
-model_rf <- randomForest(design_matrix, y, ntree = 50)
+X[,1] <- scale(X[,1])
+X[,"AgeuponOutcome"] <- scale(X[,"AgeuponOutcome"])
 
-table(predict(model_rf, design_matrix), y) -> results
-sum(diag(results))/sum(results)
+predict(model_lin, X, proba = TRUE) -> temp
 
-plot(model_rf, ylim = c(0, 1))
+temp <- temp$probabilities
+temp <- temp[, c(3, 5, 2, 1, 4)]
+colnames(temp) <- levels(y)
 
-varImpPlot(model_rf)
-
-#RANGER roughly 5 times faster:
-model_ranger<- ranger(y~.,  data = df, num.trees = 500,
-                      write.forest = TRUE, probability = TRUE)
-
-
-
-#MULTILOGLOSS:
-MultiLogLoss <- function(act, pred)
-{
-    eps = 1e-15;
-    nr <- nrow(pred)
-    pred = matrix(sapply( pred, function(x) max(eps,x)), nrow = nr)      
-    pred = matrix(sapply( pred, function(x) min(1-eps,x)), nrow = nr)
-    ll = sum(act*log(pred) + (1-act)*log(1-pred))
-    ll = ll * -1/(nrow(act))      
-    return(ll);
-}
-
-model.matrix(~ 0 + y) -> realpred
-
-predict(model_ranger, df) -> predicts
-
-MultiLogLoss(predicts$predictions, realpred)
+solution_lin <- data.frame(ID = test$ID, temp)
 
 
+#~~~~~~~~~~~~~~~~
+#Random Forests:
+#~~~~~~~~~~~~~~~~
+model_rf <- ranger(OutcomeType ~DateTime +
+                       AnimalType +
+                       SexuponOutcome +
+                       age +
+                       AgeuponOutcome +
+                       weekend +
+                       hour +
+                       breed1 +
+                       minutes +
+                       namelength +
+                       named +
+                       wday +
+                       mix,
+                   data = train, mtry = 4,
+                   num.trees = 800, probability = TRUE,
+                   importance = "impurity", write.forest = TRUE,
+                   seed = 3231L)
+#performs much better if we use probability trees. + we probabilities are better
+#for kaggle since the metric is multi logloss.
 
-#GBM:
-model_gbm <- gbm.fit(design_matrix_gen, y,
-                     distribution="multinomial", shrinkage=0.05,
-                     n.trees=500,
-                     interaction.depth=6L,
-                     train.fraction=0.8,
-                     keep.data=FALSE,
-                     verbose=TRUE)
+model_rf$prediction.error #27.6% OOB error for the probability tree - seems weird.
+
+#variable importance:
+model_rf$variable.importance %>% sort(decreasing = TRUE) %>%
+    barplot(las = 1, main = "Variable Importance for Random Forest")
+
+predict(model_rf, test) ->rf_pred
+
+rf_pred <- rf_pred$predictions
 
 
-
-predict(model_gbm, design_matrix_gen, type = "response")[1:5]
-      
-  
+#~~~~~~~~~
 #xgboost:
-library(xgboost)
+#~~~~~~~~~
+nround = 300
+
+cv_xgb <- xgb.cv(data = design_matrix_train,label = new_y, 
+                 nround = nround,
+                 eta = 0.1,
+                 objective = "multi:softprob",
+                 eval_metric = "mlogloss",
+                 #eval_metric = "merror",
+                 num_class = 5,
+                 max.depth = 6,
+                 nfold = 5,
+                 min_child_weight = 1,
+                 gamma = 0.1)
+
+#to beat with new numeric date and age and breed:
+#0.743
+
+#but got around 0.72 on the leaderboard!
+
+ggplot(cv_xgb, aes(x = 1:nround)) +
+    geom_line(aes(y = train.mlogloss.mean)) +
+    geom_line(aes( y = test.mlogloss.mean), color = "red")
+
+which.min(cv_xgb$test.mlogloss.mean) #num of trees 
+min(cv_xgb$test.mlogloss.mean)
 
 
-params <- list("objective" = "multi:softprob",
-               "eta" = .1,
-               "max_depth" = 8,
-               "eval_metric" = "mlogloss",
-               "num_class" = 5,
-               "subsample" = .8)
+model_xgb <- xgboost(data = design_matrix_train,
+                     label = new_y, 
+                     nround = 250,
+                     eta = 0.1,
+                     objective = "multi:softprob",
+                     eval_metric = "mlogloss",
+                     num_class = 5,
+                     max.depth = 6,
+                     min_child_weight = 1)
+
+#let's look at importance
+xgb.importance(feature_names = colnames(design_matrix_train), model = model_xgb) -> importance
+
+ggplot(importance, aes( x = reorder(Feature, Gain), y = Gain)) +
+    geom_bar(stat = "identity") +
+    coord_flip()
+
+predict(model_xgb, design_matrix_test) -> temp
+solution <- t(matrix(temp, nrow = 5))
+colnames(solution) <- levels(y)
 
 
-model_xgb <- xgboost(data = design_matrix, label = y,
-                     nround = 200,
-                     verbose = 1,
-                     params = params)
+solution <- data.frame(ID = test$ID, solution)
 
-# cross-validation
-nround =50
-set.seed(123)
-bst.cv <-  xgb.cv(params = params, data = design_matrix, label = y, nfold = 10, 
-                  nround = nround, verbose = T)
+write.csv(solution, "xgboosttry_withnumericft+minutes.csv", row.names = FALSE)
+#keep as template for predicting probabilities with xgboost.
 
-# cv error plot
-cv_error <- bst.cv$test.mlogloss.mean
-tr_error <- bst.cv$train.mlogloss.mean
-min <- which.min(cv_error)
-print(paste(min, cv_error[min]))
+#trying out some ensembles:
+solution_stack <- data.frame((rf_pred + solution)/2)
+solution_stack$ID <- test$ID
 
-# plot
-ggplot(bst.cv, aes(x = c(1: dim(bst.cv)[1])))+
-    geom_line(aes(y = train.mlogloss.mean), color = "green")+
-    geom_line(aes(y = test.mlogloss.mean), color = "blue")+
-    geom_vline(aes(xintercept = min), color = "red")+
-    xlab("number of iterations")+
-    ylab("mlogloss")
+solution_rf <- data.frame(rf_pred)
+solution_rf$ID <- test$ID
 
-   
-# predicting:
-predict(model_xgb, design_matrix_test) -> temp 
+best <- read.csv("xgboosttry_withnumericfeats.csv")
+best_rf <- (best[,-1] + rf_pred)/2
+best_rf$ID <- test$ID
 
+write.csv(best_rf, "rf800trees+bestxgb.csv", row.names = FALSE)
 
-temp <- matrix(temp, nrow = dim(test)[1])
-                    
-
-predict(model_ranger, df_test) -> temp
-
-prediction <- temp$predictions
-
-solution <- data.frame('ID' = test$ID, prediction)
-
-write.csv(x = solution, file = "rf5_ranger_prediction.csv", row.names = FALSE)
-
-
-
-                     

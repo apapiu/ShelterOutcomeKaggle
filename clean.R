@@ -23,6 +23,8 @@ data %>%
            hour = hour(data$DateTime),
            wday = wday(data$DateTime)) -> data
 
+data$minutes <- minute(data$DateTime)
+
 
 data$DateTime <- as.numeric(as.POSIXct(data$DateTime))
 
@@ -60,8 +62,6 @@ gsub(" Mix", "", data$Breed) -> temp
 
 strsplit(x = temp, split = "/") %>% sapply(function(x){x[1]}) -> data$breed1
 
-
-
 count(data, breed1) %>% arrange(desc(n)) %>% filter(n >75) -> popular
 
 data$breed1[!(data$breed1 %in% popular$breed1)] <- "Exotic"
@@ -77,21 +77,14 @@ data$dash <- grepl("/", data$Breed)
 #number of letter in the name:
 data$namelength <- nchar(data$Name)
 
-#
+#scale Date-Time:
 data$DateTime <- scale(data$DateTime)
 
 #see how many levels you have
 sapply(data, function(x){unique(x) %>% length()})
 
-
-
-
 train <- cbind(data[1:dim(train)[1],], OutcomeType = y) 
 test <- cbind(data[-(1:dim(train)[1]),])
-
-
-
-
 # now we're good.
 
 #let's also create the design_matrices.
@@ -102,6 +95,7 @@ design_matrix <- sparse.model.matrix( ~   DateTime +
                                           AgeuponOutcome +
                                           weekend +
                                           hour +
+                                          minutes +
                                           breed1 +
                                           namelength +
                                           named +
