@@ -3,7 +3,7 @@
 Exploratory data analysis + models on the Shelter Outcome Dataset from [Kaggle](https://www.kaggle.com/c/shelter-animal-outcomes/scripts).
 
 Using a dataset of intake information including breed, color, sex, and age, we'll need to predict the outcome for each animal. The data is from the [Austin Animal Center](http://www.austintexas.gov/department/animal-services).
-
+  
 **If you want to actually look at the HTML version of the exploratory data analysis** you can do so directly at Kaggle scripts,
 [HERE](https://www.kaggle.com/apapiu/shelter-animal-outcomes/visualizing-breeds-and-ages-by-outcome). You can also look at some plots below.
 
