@@ -75,22 +75,54 @@ rf_pred <- rf_pred$predictions
 #~~~~~~~~~
 #xgboost:
 #~~~~~~~~~
-nround = 300
 
+#something is broken with this design_matrix,
+#probably the new features.
+design_matrix <- sparse.model.matrix( ~   DateTime +
+                                          AnimalType +
+                                          SexuponOutcome +
+                                          age +
+                                          less_month +
+                                          AgeuponOutcome +
+                                          weekend +
+                                          hourz +
+                                          minute0 + #new
+                                          minute +
+                                          n + #LEAK
+                                          time + #new
+                                          miniature + #new
+                                          agressive + #new
+                                          breed1 +
+                                          namelength +
+                                          named +
+                                          wday +
+                                          mix, 
+                                      data = data)[,-1]
+
+design_matrix_train <- design_matrix[1:dim(train)[1],]
+design_matrix_test <- design_matrix[-(1:dim(train)[1]),]
+
+
+nround = 400
 cv_xgb <- xgb.cv(data = design_matrix_train,label = new_y, 
                  nround = nround,
-                 eta = 0.1,
+                 eta = 0.05,
                  objective = "multi:softprob",
                  eval_metric = "mlogloss",
                  #eval_metric = "merror",
                  num_class = 5,
-                 max.depth = 6,
+                 max.depth = 8,
                  nfold = 5,
                  min_child_weight = 1,
+                 subsample=0.75, 
+                 colsample_bytree=0.85,
                  gamma = 0.1)
 
+#0.724 with eta = 0.05, 250 trees and max_depth = 8.
+#0.730360 with numeric hourz
+
 #to beat with new numeric date and age and breed:
-#0.743
+#0.740 with eta = 0.1, 300 trees 
 
 #but got around 0.72 on the leaderboard!
 
@@ -101,16 +133,21 @@ ggplot(cv_xgb, aes(x = 1:nround)) +
 which.min(cv_xgb$test.mlogloss.mean) #num of trees 
 min(cv_xgb$test.mlogloss.mean)
 
-
+#replicate(15, {
 model_xgb <- xgboost(data = design_matrix_train,
                      label = new_y, 
-                     nround = 250,
-                     eta = 0.1,
+                     nround = 350,
+                     eta = 0.05,
                      objective = "multi:softprob",
                      eval_metric = "mlogloss",
                      num_class = 5,
-                     max.depth = 6,
-                     min_child_weight = 1)
+                     max.depth = 8,
+                     min_child_weight = 1,
+                     subsample=0.75, 
+                     colsample_bytree=0.85,
+                     gamma = 0.1)#;
+#predict(model_xgb, design_matrix_test)}) -> predz
+
 
 #let's look at importance
 xgb.importance(feature_names = colnames(design_matrix_train), model = model_xgb) -> importance
@@ -126,7 +163,7 @@ colnames(solution) <- levels(y)
 
 solution <- data.frame(ID = test$ID, solution)
 
-write.csv(solution, "xgboosttry_withnumericft+minutes.csv", row.names = FALSE)
+write.csv(solution, "xgboosttry_withnumericft+minutes+hourz2+leak.csv", row.names = FALSE)
 #keep as template for predicting probabilities with xgboost.
 
 #trying out some ensembles:
